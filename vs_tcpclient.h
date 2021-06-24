@@ -2,6 +2,7 @@
 #if _MSC_VER >= 1900
 #include <string>
 #include <thread>
+#include <vector>
 #include <memory>
 #include "vsdatatype.h"
 //异步TCP客户端，所有操作都是线程安全

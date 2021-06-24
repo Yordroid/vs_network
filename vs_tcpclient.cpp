@@ -16,7 +16,9 @@ constexpr VS_UINT32 VSTcpClientRecvDataMaxSize = 1 *1024 *1024 ;//1M
 using VsTcpSendQueue = std::queue<std::vector<VS_INT8>>;
 struct VsTcpClientContext
 {
-	VsTcpClientContext(bool isAllowLost,VS_UINT32 sendQueueSize = 20000)
+	VsTcpClientContext(bool isAllowLost,VS_UINT32 sendQueueSize = 20000):
+		m_spRecvData (new VS_INT8[VSTcpClientRecvDataMaxSize])
+		, m_spSendTempData(new VS_INT8[VSTcpClientSendOnceMaxSize])
 	{
 		magic = VsTcpClient_Magic;
 		m_bAllowLost = isAllowLost;
@@ -25,7 +27,9 @@ struct VsTcpClientContext
 			m_nSendQueueSize = 10000;
 		}
 		m_nSendQueueSize = sendQueueSize;
-
+		m_isConnecting = false;
+		m_bCanSend = false;
+		remoteServerPort = 0;
 	}
 	VS_UINT32 magic;
 	uv_loop_t uvLoop;
@@ -53,9 +57,9 @@ struct VsTcpClientContext
 	std::mutex m_mutexSend;
 
 	//接收buf
-	std::unique_ptr<VS_INT8> m_spRecvData;
+	std::unique_ptr<VS_INT8[]> m_spRecvData;
 	//临时发送buf,用来组大包发送
-	std::unique_ptr<VS_INT8> m_spSendTempData;
+	std::unique_ptr<VS_INT8[]> m_spSendTempData;
 };
 //内部静态函数
 //写数据结果
@@ -118,29 +122,29 @@ void VSTcpClient_send(VsTcpClientContext *context)
 	 		VS_UINT32 curDataTotalLen = 0;
 	 		VS_INT8* sendBuf = context->m_spSendTempData.get();
 	 		bool  hasData = true;
+			std::vector<VS_INT8> vecData;
 	 		while (1)
 	 		{
-				std::vector<VS_INT8> vecData;
+				
+				vecData.clear();
+				if (sendQueues.empty())
 				{
-					std::lock_guard<std::mutex> locker(context->m_mutexSend);
-					if (context->m_sendQueue.empty())
+					if (0 == curDataTotalLen)
 					{
-						if (0 == curDataTotalLen)
-						{
-							hasData = false;
-						}
-						break;
+						hasData = false;
 					}
-					vecData = std::move(context->m_sendQueue.front());
+					break;
 				}
+				vecData = sendQueues.front();
+			
 	
-	 		
+			
 	 			VS_UINT32 curDataLen = vecData.size();
-	 			if (curDataTotalLen + curDataLen > VSTcpClientSendOnceMaxSize - 1024)
+	 			if (curDataTotalLen + curDataLen > VSTcpClientSendOnceMaxSize)
 	 			{
 	 				break;
 	 			}
-	 			
+				sendQueues.pop();
 	 			memcpy(sendBuf + curDataTotalLen, vecData.data(), curDataLen);
 	 			curDataTotalLen += curDataLen;
 	 
@@ -152,19 +156,15 @@ void VSTcpClient_send(VsTcpClientContext *context)
 	 		}
 	 
 	 		uv_buf_t buf = uv_buf_init(sendBuf, curDataTotalLen);
-// 	 			uv_write_t * reqWrite = (uv_write_t*)malloc(sizeof(uv_write_t));//&clientInfo->m_uvInfo.uvWriteReq
-// 	 			if (nullptr == reqWrite)
-// 	 			{
-// 	 				return -1;
-// 	 			}
-			uv_write_t reqWrite;
-			reqWrite.data = context;
-	 		VS_INT32 ret = uv_write(&reqWrite, (uv_stream_t*)&context->uvTcpClient, &buf, 1, VSTcpClient_cb_write_result);
+			uv_write_t *reqWrite =  new uv_write_t();
+			reqWrite->data = context;
+	 		VS_INT32 ret = uv_write(reqWrite, (uv_stream_t*)&context->uvTcpClient, &buf, 1, VSTcpClient_cb_write_result);
 	 		if (0 > ret)
 	 		{
 	 			std::lock_guard<std::mutex> locker(context->m_mutexSend);
 	 			context->m_sendQueue.emplace(std::move(std::vector<VS_INT8>{sendBuf, sendBuf + curDataTotalLen}));
 				context->m_bCanSend = false;
+				LOG_ERROR(MODULE_NAME,"send fail");
 	 			break;
 	 		}
 	 
@@ -256,15 +256,17 @@ void VSTcpClient_cb_write_result(uv_write_t* req, int status)
 			_this->m_bCanSend = false;
 			_this->cbConnectStatus(VsTcpClient_ConnectStatus::VsTcpClient_DisConnect);
 		}
+		delete req;
 		return;
 	}
+	delete req;
 }
 
 //连接结果回调
 void VSTcpClient_conn_cb(uv_connect_t* req, VS_INT32 status)
 {
 	CHECK_AND_GET_CLIENT_HANDLE(req->data);
-	_this->m_isConnecting = VS_FALSE;
+	_this->m_isConnecting = false;
 	if (0 == _this->cbConnectStatus)
 	{
 		LOG_ERROR(MODULE_NAME, "VSTcpClient_cb_read---cbConnectStatus not set");
@@ -295,7 +297,6 @@ void VSTcpClient_conn_cb(uv_connect_t* req, VS_INT32 status)
 	if (0 != ret)
 	{
 		VsTcpClient_printErrorUvNetworkLog("uv_read_start", ret);
-		return;
 	}
 
 }
@@ -307,23 +308,7 @@ VS_HANDLE VsTcpClient_start(bool isAllowLost /*= VS_TRUE*/, VS_UINT32 sendQueueN
 {
 	VsTcpClientContext *_this = new VsTcpClientContext(isAllowLost, sendQueueNum);
 	std::atomic_bool isInitFinish = false;
-	_this->m_spRecvData = std::make_unique<VS_INT8>(VSTcpClientRecvDataMaxSize);
-	if (nullptr == _this->m_spRecvData)
-	{
-		delete _this;
-		_this = nullptr;
-		LOG_ERROR(MODULE_NAME,"VsTcpClient_start-- recv data buf mem fail:size[%u]", VSTcpClientRecvDataMaxSize);
-		return nullptr;
-	}
-	_this->m_spSendTempData = std::make_unique<VS_INT8>(VSTcpClientSendOnceMaxSize);
-	if (nullptr == _this->m_spSendTempData)
-	{
-		_this->m_spRecvData.reset();
-		delete _this;
-		_this = nullptr;
-		LOG_ERROR(MODULE_NAME, "VsTcpClient_start-- recv data buf mem fail:size[%u]", VSTcpClientSendOnceMaxSize);
-		return nullptr;
-	}
+
 	_this->netThread = std::make_unique<std::thread>([&isInitFinish,_this] {
 		//loop init
 		VS_INT32 ret = uv_loop_init(&_this->uvLoop);
@@ -340,7 +325,7 @@ VS_HANDLE VsTcpClient_start(bool isAllowLost /*= VS_TRUE*/, VS_UINT32 sendQueueN
 			return;
 		}
 		_this->uvTimer.data = _this;
-		ret = uv_timer_start(&_this->uvTimer, VSTcpClient_cb_timer, 0, VSTcpClientTimeroutValue);
+		ret = uv_timer_start(&_this->uvTimer, VSTcpClient_cb_timer, 100, VSTcpClientTimeroutValue);
 		if (0 != ret)
 		{
 			VsTcpClient_printErrorUvNetworkLog("VsTcpClient_start---uv_timer_start fail", ret);
@@ -363,6 +348,7 @@ VS_HANDLE VsTcpClient_start(bool isAllowLost /*= VS_TRUE*/, VS_UINT32 sendQueueN
 		_this = nullptr;
 		return nullptr;
 	}
+	return _this;
 
 }
 void VsTcpClient_stop(VS_HANDLE clientHandle)
@@ -393,24 +379,14 @@ void VsTcpClient_stop(VS_HANDLE clientHandle)
 
 void VsTcpClient_setDelegate(VS_HANDLE clientHandle, VsTcpClient_OnConnectStatusCallback cbConnectStatus, VsTcpClient_OnRecvDataCallback cbRecvMsg)
 {
-	VsTcpClientContext *_this = static_cast<VsTcpClientContext*>(clientHandle);
-	if (nullptr == _this)
-	{
-		LOG_ERROR(MODULE_NAME, "VsTcpClient::%s VsTcpClientContext is nullptr ",__FUNCTION__);
-		return;
-	}
+	CHECK_AND_GET_CLIENT_HANDLE(clientHandle);
 	_this->cbConnectStatus = cbConnectStatus;
 	_this->cbRecvData = cbRecvMsg;
 }
 
 void VsTcpClient_asyncConnect(VS_HANDLE clientHandle, const std::string & remoteServerAddr, VS_UINT16 remotePort)
 {
-	VsTcpClientContext *_this = static_cast<VsTcpClientContext*>(clientHandle);
-	if (nullptr == _this)
-	{
-		LOG_ERROR(MODULE_NAME, "VsTcpClient::%s VsTcpClientContext is nullptr ", __FUNCTION__);
-		return;
-	}
+	CHECK_AND_GET_CLIENT_HANDLE(clientHandle);
 	VSTcpClient_postTask(_this, [_this, remoteServerAddr, remotePort] {
 		if (_this->m_isConnecting)
 		{
@@ -450,12 +426,7 @@ void VsTcpClient_asyncConnect(VS_HANDLE clientHandle, const std::string & remote
 
 void VsTcpClient_reConnect(VS_HANDLE clientHandle)
 {
-	VsTcpClientContext *_this = static_cast<VsTcpClientContext*>(clientHandle);
-	if (nullptr == _this)
-	{
-		LOG_ERROR(MODULE_NAME, "VsTcpClient::%s VsTcpClientContext is nullptr ", __FUNCTION__);
-		return;
-	}
+	CHECK_AND_GET_CLIENT_HANDLE(clientHandle);
 	if (_this->remoteServerAddr == "" || _this->remoteServerPort == 0)
 	{
 		LOG_ERROR(MODULE_NAME, "VsTcpClient_reConnect renmote connect info invalid,is not call asynconnect? ");
@@ -466,12 +437,7 @@ void VsTcpClient_reConnect(VS_HANDLE clientHandle)
 
 void VsTcpClient_close(VS_HANDLE clientHandle)
 {
-	VsTcpClientContext *_this = static_cast<VsTcpClientContext*>(clientHandle);
-	if (nullptr == _this)
-	{
-		LOG_ERROR(MODULE_NAME, "VsTcpClient::%s VsTcpClientContext is nullptr ", __FUNCTION__);
-		return;
-	}
+	CHECK_AND_GET_CLIENT_HANDLE(clientHandle);
 	VSTcpClient_postTask(_this, [_this] {
 		if (uv_is_active((uv_handle_t*)&_this->uvTcpClient)) {
 			uv_read_stop((uv_stream_t*)&_this->uvTcpClient);
@@ -482,9 +448,10 @@ void VsTcpClient_close(VS_HANDLE clientHandle)
 }
 
 
-void VsTcpClient_sendData(VS_HANDLE clientHandle, VS_INT8* data, VS_UINT32 dataLen)
+void VsTcpClient_sendData(VS_HANDLE clientHandle, const std::vector<VS_INT8> &vecData)
 {
 	CHECK_AND_GET_CLIENT_HANDLE(clientHandle);
+	VS_UINT32 dataLen = vecData.size();
 	if (_this->m_bAllowLost)
 	{
 		std::lock_guard<std::mutex> locker(_this->m_mutexSend);
@@ -504,13 +471,19 @@ void VsTcpClient_sendData(VS_HANDLE clientHandle, VS_INT8* data, VS_UINT32 dataL
 			if (_this->m_sendQueue.size() < _this->m_nSendQueueSize)
 			{
 				printCount = 0;
+				if (dataLen < VSTcpClientSendOnceMaxSize)
+				{
+					_this->m_sendQueue.emplace(std::move(vecData));
+					break;
+				}
 				//如果应用层一次发送超过VSTcpClientSendOnceMaxSize的大小数据,则这里拆包放进队列,因为发送时需要组大包发送，分配了临时buf
 				VS_UINT32 dataOffset = 0;
 				while(dataLen>0)
 				{
+	
 					VS_UINT32 curPacketSize = dataLen > VSTcpClientSendOnceMaxSize ? VSTcpClientSendOnceMaxSize : dataLen;
 					std::vector<VS_INT8> vecBuf;
-					vecBuf.insert(vecBuf.end(), data + dataOffset, data + dataOffset+curPacketSize);
+					vecBuf.insert(vecBuf.end(), vecData.data() + dataOffset, vecData.data() + dataOffset+curPacketSize);
 					_this->m_sendQueue.emplace(std::move(vecBuf));
 					dataOffset += curPacketSize;
 					dataLen -= curPacketSize;
@@ -530,4 +503,18 @@ void VsTcpClient_sendData(VS_HANDLE clientHandle, VS_INT8* data, VS_UINT32 dataL
 		VSTcpClient_send(_this);
 
 	});
+}
+
+void VsTcpClient_sendData(VS_HANDLE clientHandle, const std::string &strData)
+{
+	std::vector<VS_INT8> vecBuf;
+	vecBuf.insert(vecBuf.end(), strData.begin(),strData.end());
+	VsTcpClient_sendData(clientHandle, vecBuf);
+}
+
+void VsTcpClient_sendData(VS_HANDLE clientHandle, VS_INT8* data, VS_UINT32 dataLen)
+{
+	std::vector<VS_INT8> vecBuf;
+	vecBuf.insert(vecBuf.end(), data, data+ dataLen);
+	VsTcpClient_sendData(clientHandle, vecBuf);
 }
