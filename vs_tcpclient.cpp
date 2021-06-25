@@ -11,7 +11,7 @@ using VsTcpClientTask = std::function<void()>;
 constexpr VS_UINT32 VsTcpClient_Magic = 0x45567889;
 constexpr VS_INT8* MODULE_NAME = "VsTcpClient";
 constexpr VS_UINT32 VSTcpClientTimeroutValue = 10;//10ms
-constexpr VS_UINT32 VSTcpClientSendOnceMaxSize = 100 * 1024;//å•æ¬¡å‘é€æœ€å¤§çš„å¤§å°100K,å¦‚æœåº”ç”¨å•æ¬¡æ”¾è¿›çš„æ•°æ®è¶…è¿‡è¿™ä¸ªå¤§å°ï¼Œåˆ™æ‹†åˆ†æ”¾è¿›é˜Ÿåˆ—
+constexpr VS_UINT32 VSTcpClientSendOnceMaxSize = 100 * 1024;//µ¥´Î·¢ËÍ×î´óµÄ´óĞ¡100K,Èç¹ûÓ¦ÓÃµ¥´Î·Å½øµÄÊı¾İ³¬¹ıÕâ¸ö´óĞ¡£¬Ôò²ğ·Ö·Å½ø¶ÓÁĞ
 constexpr VS_UINT32 VSTcpClientRecvDataMaxSize = 1 *1024 *1024 ;//1M
 using VsTcpSendQueue = std::queue<std::vector<VS_INT8>>;
 struct VsTcpClientContext
@@ -41,9 +41,9 @@ struct VsTcpClientContext
 	VsTcpClient_OnConnectStatusCallback cbConnectStatus;
 	VsTcpClient_OnRecvDataCallback   cbRecvData;
 
-	bool			m_isConnecting;//æ­£åœ¨è¿æ¥ä¸­
-	std::atomic_bool m_bCanSend;//å¯ä»¥å‘é€
-	bool m_bAllowLost;	//å…è®¸å‘é€æ•°æ®ä¸¢å¤±
+	bool			m_isConnecting;//ÕıÔÚÁ¬½ÓÖĞ
+	std::atomic_bool m_bCanSend;//¿ÉÒÔ·¢ËÍ
+	bool m_bAllowLost;	//ÔÊĞí·¢ËÍÊı¾İ¶ªÊ§
 	VS_UINT32       m_nSendQueueSize;
 	std::string     remoteServerAddr;
 	VS_UINT16       remoteServerPort;
@@ -52,37 +52,37 @@ struct VsTcpClientContext
 	std::list<VsTcpClientTask> m_listTask;
 	std::unique_ptr<std::thread>  netThread;
 
-	//å‘é€é˜Ÿåˆ—
+	//·¢ËÍ¶ÓÁĞ
 	VsTcpSendQueue m_sendQueue;
 	std::mutex m_mutexSend;
 
-	//æ¥æ”¶buf
+	//½ÓÊÕbuf
 	std::unique_ptr<VS_INT8[]> m_spRecvData;
-	//ä¸´æ—¶å‘é€buf,ç”¨æ¥ç»„å¤§åŒ…å‘é€
+	//ÁÙÊ±·¢ËÍbuf,ÓÃÀ´×é´ó°ü·¢ËÍ
 	std::unique_ptr<VS_INT8[]> m_spSendTempData;
 };
-//å†…éƒ¨é™æ€å‡½æ•°
-//å†™æ•°æ®ç»“æœ
+//ÄÚ²¿¾²Ì¬º¯Êı
+//Ğ´Êı¾İ½á¹û
 static void VSTcpClient_cb_write_result(uv_write_t* req, int status);
-//åœ¨ç½‘ç»œçº¿ç¨‹çš„å‘é€
+//ÔÚÍøÂçÏß³ÌµÄ·¢ËÍ
 static void VSTcpClient_send(VsTcpClientContext *context);
 
 
 
-//è¿æ¥å›è°ƒ
+//Á¬½Ó»Øµ÷
 static void VSTcpClient_conn_cb(uv_connect_t* req, VS_INT32 status);
-//è¯»å†…å­˜åˆ†é…
+//¶ÁÄÚ´æ·ÖÅä
 static void VSTcpClient_before_read(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf);
-//è¯»å›è°ƒ
+//¶Á»Øµ÷
 static void VSTcpClient_cb_read(uv_stream_t *handle, ssize_t nread, const uv_buf_t *buf);
-//å…³é—­å®¢æˆ·ç«¯
+//¹Ø±Õ¿Í»§¶Ë
 static void VSTcpClient_cb_after_close(uv_handle_t* handle);
-//å®šæ—¶å™¨
+//¶¨Ê±Æ÷
 static void VSTcpClient_cb_timer(uv_timer_t* timer_handle);
-//å¼‚æ­¥è¯·æ±‚
+//Òì²½ÇëÇó
 static void VSTcpClient_postTask(VsTcpClientContext *context, VsTcpClientTask &&task);
 
-//åˆ¤æ–­æ˜¯å¦ä¸ºæ­£ç¡®çš„å¥æŸ„
+//ÅĞ¶ÏÊÇ·ñÎªÕıÈ·µÄ¾ä±ú
 #define  CHECK_AND_GET_CLIENT_HANDLE(clientHandle) \
 VsTcpClientContext *_this = static_cast<VsTcpClientContext*>(clientHandle);\
 if (nullptr == _this)\
@@ -95,13 +95,13 @@ LOG_ERROR(MODULE_NAME, "VsTcpClient::%s VsTcpClientContext is no valind client h
 return; \
 }
 
-//æŠ•é€’ä»»åŠ¡åˆ°é˜Ÿåˆ—æ‰€ä»¥æ“ä½œéƒ½åœ¨ç½‘ç»œçº¿ç¨‹å¤„ç†
+//Í¶µİÈÎÎñµ½¶ÓÁĞËùÒÔ²Ù×÷¶¼ÔÚÍøÂçÏß³Ì´¦Àí
 void VSTcpClient_postTask(VsTcpClientContext *context ,VsTcpClientTask &&task)
 {
 	std::lock_guard<std::mutex> locker(context->m_mutexTask);
 	context->m_listTask.emplace_back(std::move(task));
 }
-//åœ¨ç½‘ç»œçº¿ç¨‹é‡Œé¢è°ƒç”¨
+//ÔÚÍøÂçÏß³ÌÀïÃæµ÷ÓÃ
 void VSTcpClient_send(VsTcpClientContext *context)
 {
 	if (!context->m_bCanSend)
@@ -116,7 +116,7 @@ void VSTcpClient_send(VsTcpClientContext *context)
 
 	try
 	{
-		//ç»„å¤§åŒ…å‘å‡ºå»,è¿™æ ·æ•ˆç‡æ›´é«˜
+		//×é´ó°ü·¢³öÈ¥,ÕâÑùĞ§ÂÊ¸ü¸ß
 	 	while (1)
 	 	{
 	 		VS_UINT32 curDataTotalLen = 0;
@@ -184,7 +184,7 @@ static void VsTcpClient_printErrorUvNetworkLog(const VS_INT8* errType, VS_INT32 
 void VSTcpClient_cb_timer(uv_timer_t* timer_handle)
 {
 	CHECK_AND_GET_CLIENT_HANDLE(timer_handle->data);
-	//å¤„ç†ä»»åŠ¡é˜Ÿåˆ—
+	//´¦ÀíÈÎÎñ¶ÓÁĞ
 	std::list<VsTcpClientTask> listTasks;
 	{
 		std::lock_guard<std::mutex> locker(_this->m_mutexTask);
@@ -247,8 +247,8 @@ void VSTcpClient_cb_write_result(uv_write_t* req, int status)
 		VsTcpClient_printErrorUvNetworkLog("VSTcpClient_cb_write_result", status);
 		if (status == UV_EAGAIN)
 		{
-			// é˜Ÿåˆ—æ»¡çš„æ”¶ï¼Œä»€ä¹ˆéƒ½ä¸è¦åš
-			// ä¹Ÿè¿˜æ˜¯å‘é€çŠ¶æ€ï¼Œä¸èƒ½å†å¾€ç½‘ç»œé˜Ÿåˆ—é‡Œåšä¸œè¥¿
+			// ¶ÓÁĞÂúµÄÊÕ£¬Ê²Ã´¶¼²»Òª×ö
+			// Ò²»¹ÊÇ·¢ËÍ×´Ì¬£¬²»ÄÜÔÙÍùÍøÂç¶ÓÁĞÀï×ö¶«Î÷
 		}
 		else
 		{
@@ -262,7 +262,7 @@ void VSTcpClient_cb_write_result(uv_write_t* req, int status)
 	delete req;
 }
 
-//è¿æ¥ç»“æœå›è°ƒ
+//Á¬½Ó½á¹û»Øµ÷
 void VSTcpClient_conn_cb(uv_connect_t* req, VS_INT32 status)
 {
 	CHECK_AND_GET_CLIENT_HANDLE(req->data);
@@ -280,7 +280,7 @@ void VSTcpClient_conn_cb(uv_connect_t* req, VS_INT32 status)
 		return;
 	}
 	_this->m_bCanSend = true;
-	//è¿æ¥æˆåŠŸ,å‘é€æœªè¿æ¥å‰çš„æ•°æ®
+	//Á¬½Ó³É¹¦,·¢ËÍÎ´Á¬½ÓÇ°µÄÊı¾İ
 	if (_this->m_bAllowLost)
 	{
 		VsTcpSendQueue clearSendQueue;
@@ -292,7 +292,7 @@ void VSTcpClient_conn_cb(uv_connect_t* req, VS_INT32 status)
 		VSTcpClient_send(_this);
 	}
 	_this->cbConnectStatus(VsTcpClient_ConnectStatus::VsTcpClient_NewConnect);
-	//è¿æ¥æˆåŠŸå‘èµ·å¼‚æ­¥è¯»è¯·æ±‚
+	//Á¬½Ó³É¹¦·¢ÆğÒì²½¶ÁÇëÇó
 	VS_INT32 ret = uv_read_start((uv_stream_t*)&_this->uvTcpClient, VSTcpClient_before_read, VSTcpClient_cb_read);
 	if (0 != ret)
 	{
@@ -460,42 +460,44 @@ void VsTcpClient_sendData(VS_HANDLE clientHandle, const std::vector<VS_INT8> &ve
 			LOG_ERROR(MODULE_NAME,"VsTcpClient_sendData fail ,send queue full :[%u],data lost:[%u]", _this->m_nSendQueueSize,dataLen);
 			return;
 		}
+
 	}
-		//ä¸å…è®¸ä¸¢å¤±,é˜»å¡ç­‰å¾…é˜Ÿåˆ—ä¸æ»¡
-		while (1)
+
+	//²»ÔÊĞí¶ªÊ§,×èÈûµÈ´ı¶ÓÁĞ²»Âú
+	while (1)
+	{
+		static int printCount = 0;
+		std::lock_guard<std::mutex> locker(_this->m_mutexSend);
+		if (_this->m_sendQueue.size() < _this->m_nSendQueueSize)
 		{
-			static int printCount = 0;
-			std::lock_guard<std::mutex> locker(_this->m_mutexSend);
-			if (_this->m_sendQueue.size() < _this->m_nSendQueueSize)
+			printCount = 0;
+			if (dataLen < VSTcpClientSendOnceMaxSize)
 			{
-				printCount = 0;
-				if (dataLen < VSTcpClientSendOnceMaxSize)
-				{
-					_this->m_sendQueue.emplace(std::move(vecData));
-					break;
-				}
-				//å¦‚æœåº”ç”¨å±‚ä¸€æ¬¡å‘é€è¶…è¿‡VSTcpClientSendOnceMaxSizeçš„å¤§å°æ•°æ®,åˆ™è¿™é‡Œæ‹†åŒ…æ”¾è¿›é˜Ÿåˆ—,å› ä¸ºå‘é€æ—¶éœ€è¦ç»„å¤§åŒ…å‘é€ï¼Œåˆ†é…äº†ä¸´æ—¶buf
-				VS_UINT32 dataOffset = 0;
-				while(dataLen>0)
-				{
-	
-					VS_UINT32 curPacketSize = dataLen > VSTcpClientSendOnceMaxSize ? VSTcpClientSendOnceMaxSize : dataLen;
-					std::vector<VS_INT8> vecBuf;
-					vecBuf.insert(vecBuf.end(), vecData.data() + dataOffset, vecData.data() + dataOffset+curPacketSize);
-					_this->m_sendQueue.emplace(std::move(vecBuf));
-					dataOffset += curPacketSize;
-					dataLen -= curPacketSize;
-				}
+				_this->m_sendQueue.emplace(std::move(vecData));
 				break;
 			}
-			if (++printCount > 1000)
+			//Èç¹ûÓ¦ÓÃ²ãÒ»´Î·¢ËÍ³¬¹ıVSTcpClientSendOnceMaxSizeµÄ´óĞ¡Êı¾İ,ÔòÕâÀï²ğ°ü·Å½ø¶ÓÁĞ,ÒòÎª·¢ËÍÊ±ĞèÒª×é´ó°ü·¢ËÍ£¬·ÖÅäÁËÁÙÊ±buf
+			VS_UINT32 dataOffset = 0;
+			while(dataLen>0)
 			{
-				printCount = 0;
-				LOG_ERROR(MODULE_NAME,"VsTcpClient_sendData buf full ,wait buf no full");
+	
+				VS_UINT32 curPacketSize = dataLen > VSTcpClientSendOnceMaxSize ? VSTcpClientSendOnceMaxSize : dataLen;
+				std::vector<VS_INT8> vecBuf;
+				vecBuf.insert(vecBuf.end(), vecData.data() + dataOffset, vecData.data() + dataOffset+curPacketSize);
+				_this->m_sendQueue.emplace(std::move(vecBuf));
+				dataOffset += curPacketSize;
+				dataLen -= curPacketSize;
 			}
-			Sleep(10);
-		
+			break;
 		}
+		if (++printCount > 1000)
+		{
+			printCount = 0;
+			LOG_ERROR(MODULE_NAME,"VsTcpClient_sendData buf full ,wait buf no full");
+		}
+		Sleep(10);
+		
+	}
 	VSTcpClient_postTask(_this,[_this] {
 		VSTcpClient_send(_this);
 
